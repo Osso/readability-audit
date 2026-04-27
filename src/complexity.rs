@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde_json::Value;
 
@@ -6,21 +6,11 @@ use crate::types::Issue;
 
 const MAX_COGNITIVE: u64 = 15;
 const MAX_CYCLOMATIC: u64 = 20;
-
-fn rust_code_analysis_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
-    PathBuf::from(home)
-        .join("Repos/rust-code-analysis/target/release/rust-code-analysis-cli")
-}
+const BINARY: &str = "rust-code-analysis-cli";
 
 pub fn check_cognitive_complexity(root: &Path) -> Vec<Issue> {
-    let binary = rust_code_analysis_path();
-    if !binary.exists() {
-        return Vec::new();
-    }
-
     let src_dir = root.join("src");
-    let result = std::process::Command::new(&binary)
+    let result = std::process::Command::new(BINARY)
         .args(["-m", "-p", src_dir.to_str().unwrap_or("src"), "-O", "json"])
         .output();
 
