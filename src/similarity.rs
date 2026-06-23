@@ -103,7 +103,10 @@ pub fn check_duplicated_functions(root: &Path, files: &[std::path::PathBuf]) -> 
         // Group by body content
         let mut body_groups: HashMap<&str, Vec<&str>> = HashMap::new();
         for (fpath, body) in entries {
-            body_groups.entry(body.as_str()).or_default().push(fpath.as_str());
+            body_groups
+                .entry(body.as_str())
+                .or_default()
+                .push(fpath.as_str());
         }
         for (_, locs) in &body_groups {
             if locs.len() <= 1 {
@@ -112,12 +115,7 @@ pub fn check_duplicated_functions(root: &Path, files: &[std::path::PathBuf]) -> 
             // Must span different parent directories
             let dirs: std::collections::HashSet<&str> = locs
                 .iter()
-                .map(|l| {
-                    Path::new(l)
-                        .parent()
-                        .and_then(|p| p.to_str())
-                        .unwrap_or("")
-                })
+                .map(|l| Path::new(l).parent().and_then(|p| p.to_str()).unwrap_or(""))
                 .collect();
             if dirs.len() > 1 {
                 let locs_display = locs[..locs.len().min(3)].join(", ");
@@ -227,5 +225,29 @@ mod tests {
             issues.is_empty(),
             "expected no SIBLING issue for dissimilar functions"
         );
+    }
+
+    #[test]
+    fn test_duplicated_functions_across_files() {
+        let dir = std::env::temp_dir().join(format!(
+            "readability-duplicate-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::create_dir_all(dir.join("tests")).unwrap();
+        let first = dir.join("src/a.rs");
+        let second = dir.join("tests/b.rs");
+        let body = "fn repeated() {\n    let a = 1;\n    let b = 2;\n    let c = 3;\n    let d = 4;\n    a + b + c + d\n}\n";
+        std::fs::write(&first, body).unwrap();
+        std::fs::write(&second, body).unwrap();
+
+        let issues = check_duplicated_functions(&dir, &[first, second]);
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].category, "DUPLICATE");
+
+        std::fs::remove_dir_all(dir).ok();
     }
 }

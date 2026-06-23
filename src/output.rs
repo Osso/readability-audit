@@ -20,7 +20,10 @@ pub const CATEGORY_ORDER: &[&str] = &[
 pub fn format_text(issues: &[Issue]) -> String {
     let mut by_cat: HashMap<&str, Vec<&Issue>> = HashMap::new();
     for issue in issues {
-        by_cat.entry(issue.category.as_str()).or_default().push(issue);
+        by_cat
+            .entry(issue.category.as_str())
+            .or_default()
+            .push(issue);
     }
 
     let mut lines = Vec::new();
@@ -76,9 +79,8 @@ pub fn build_dedup_key(item: &Issue) -> String {
     format!("{}:{}:{}", item.category, item.file, fn_part)
 }
 
-static PLAN_LINE_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^- \[.\] `([^`]+):(\d+)` (?:`(\w+)\(\)` )?— (.+)").unwrap()
-});
+static PLAN_LINE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^- \[.\] `([^`]+):(\d+)` (?:`(\w+)\(\)` )?— (.+)").unwrap());
 
 fn guess_category(problem: &str) -> &'static str {
     if problem.contains("body lines") || problem.contains("lines (max") {
@@ -87,7 +89,8 @@ fn guess_category(problem: &str) -> &'static str {
     if problem.to_lowercase().contains("nesting") {
         return "NESTING";
     }
-    if problem.to_lowercase().contains("cognitive") || problem.to_lowercase().contains("cyclomatic") {
+    if problem.to_lowercase().contains("cognitive") || problem.to_lowercase().contains("cyclomatic")
+    {
         return "COMPLEXITY";
     }
     if problem.contains("contains()") || problem.contains("O(n") {
@@ -117,8 +120,7 @@ pub fn append_plan(root: &Path, issues: &[Issue]) -> anyhow::Result<usize> {
     };
 
     // Build set of existing dedup keys
-    let mut existing_keys: std::collections::HashSet<String> =
-        std::collections::HashSet::new();
+    let mut existing_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
     for line in existing.lines() {
         if let Some(caps) = PLAN_LINE_RE.captures(line) {
             let fpath = caps.get(1).map(|m| m.as_str()).unwrap_or("");
@@ -155,7 +157,10 @@ pub fn append_plan(root: &Path, issues: &[Issue]) -> anyhow::Result<usize> {
         if items.is_empty() {
             continue;
         }
-        lines.push(format!("\n## Readability — {} (auto-detected)\n", title_case(cat)));
+        lines.push(format!(
+            "\n## Readability — {} (auto-detected)\n",
+            title_case(cat)
+        ));
         let mut sorted: Vec<&&&Issue> = items.iter().collect();
         sorted.sort_by_key(|i| (i.file.as_str(), i.line));
         for item in sorted {
@@ -186,5 +191,102 @@ fn title_case(s: &str) -> String {
     match c.next() {
         None => String::new(),
         Some(f) => f.to_uppercase().to_string() + &c.as_str().to_lowercase(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn issue(
+        category: &str,
+        file: &str,
+        line: usize,
+        function: Option<&str>,
+        problem: &str,
+    ) -> Issue {
+        Issue {
+            category: category.to_string(),
+            file: file.to_string(),
+            line,
+            function: function.map(ToOwned::to_owned),
+            problem: problem.to_string(),
+            fix: "fix it".to_string(),
+        }
+    }
+
+    fn temp_dir(prefix: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("{prefix}-{nanos}"));
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn formats_text_and_plan_in_stable_order() {
+        let issues = vec![
+            issue("STATE", "src/b.rs", 9, None, "contains() before push()"),
+            issue(
+                "LENGTH",
+                "src/a.rs",
+                3,
+                Some("big"),
+                "Function is 80 body lines",
+            ),
+        ];
+
+        let text = format_text(&issues);
+        assert!(text.contains("## LENGTH (1 issues)"));
+        assert!(text.contains("[LENGTH] src/a.rs:3"));
+        assert!(text.contains("big()"));
+        assert!(text.find("## LENGTH").unwrap() < text.find("## STATE").unwrap());
+
+        let plan = format_plan(&issues);
+        assert!(plan.contains("- [ ] `src/a.rs:3` `big()` — Function is 80 body lines"));
+        assert!(plan.contains("- [ ] `src/b.rs:9` — contains() before push()"));
+    }
+
+    #[test]
+    fn appends_plan_items_and_deduplicates_existing_entries() {
+        let root = temp_dir("readability-plan");
+        let plan = root.join("PLAN.md");
+        std::fs::write(
+            &plan,
+            "- [ ] `src/a.rs:3` `big()` — Function is 80 body lines\n",
+        )
+        .unwrap();
+        let issues = vec![
+            issue(
+                "LENGTH",
+                "src/a.rs",
+                3,
+                Some("big"),
+                "Function is 80 body lines",
+            ),
+            issue("CLARITY", "src/c.rs", 7, None, "Inline hex literal"),
+        ];
+
+        assert_eq!(append_plan(&root, &issues).unwrap(), 1);
+        assert_eq!(append_plan(&root, &issues).unwrap(), 0);
+
+        let content = std::fs::read_to_string(plan).unwrap();
+        assert!(content.contains("Readability — Clarity"));
+        assert!(content.contains("`src/c.rs:7` — Inline hex literal"));
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn guesses_categories_from_existing_plan_text() {
+        assert_eq!(guess_category("Cognitive complexity 20"), "COMPLEXITY");
+        assert_eq!(guess_category("deep nesting"), "NESTING");
+        assert_eq!(guess_category("Suppressed lint"), "SUPPRESS");
+        assert_eq!(guess_category("Identical implementation"), "DUPLICATE");
+        assert_eq!(guess_category("unclassified"), "LENGTH");
+        assert_eq!(title_case(""), "");
+        assert_eq!(title_case("SIBLING"), "Sibling");
     }
 }

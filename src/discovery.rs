@@ -41,7 +41,8 @@ impl IgnoreConfig {
             let last_component = line.trim_end_matches('/').split('/').last().unwrap_or(line);
             let has_extension = last_component.contains('.');
             if has_slash && !has_glob && !has_extension {
-                self.exclude_dirs.insert(line.trim_end_matches('/').to_string());
+                self.exclude_dirs
+                    .insert(line.trim_end_matches('/').to_string());
             } else {
                 self.exclude_patterns.push(line.to_string());
             }
@@ -50,7 +51,10 @@ impl IgnoreConfig {
 
     fn is_excluded_by_pattern(&self, rel: &str) -> bool {
         use glob::Pattern;
-        let basename = Path::new(rel).file_name().and_then(|s| s.to_str()).unwrap_or("");
+        let basename = Path::new(rel)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
         for pat in &self.exclude_patterns {
             if let Ok(p) = Pattern::new(pat) {
                 if p.matches(rel) || p.matches(basename) {
@@ -169,7 +173,10 @@ pub fn resolve_scan_targets(
     let unique_roots: HashSet<PathBuf> = roots.into_iter().flatten().collect();
     if unique_roots.len() != 1 {
         let root_list: Vec<String> = {
-            let mut v: Vec<String> = unique_roots.iter().map(|r| r.display().to_string()).collect();
+            let mut v: Vec<String> = unique_roots
+                .iter()
+                .map(|r| r.display().to_string())
+                .collect();
             v.sort();
             v
         };
@@ -188,7 +195,11 @@ pub fn resolve_scan_targets(
     for target in &resolved {
         let candidates: Vec<PathBuf> = if target.is_dir() {
             let mut v: Vec<PathBuf> = Vec::new();
-            for entry in WalkDir::new(target).sort_by_file_name().into_iter().flatten() {
+            for entry in WalkDir::new(target)
+                .sort_by_file_name()
+                .into_iter()
+                .flatten()
+            {
                 if entry.path().extension().and_then(|s| s.to_str()) == Some("rs") {
                     v.push(entry.path().to_path_buf());
                 }
@@ -272,5 +283,58 @@ mod tests {
         let ignore = IgnoreConfig::new(&[]);
         let files = find_rs_files(&tmp, &ignore);
         assert_eq!(files.len(), 1);
+    }
+
+    #[test]
+    fn ignore_file_supports_directories_and_globs() {
+        let tmp = make_tmp_dir("ignore");
+        fs::write(tmp.join("Cargo.toml"), "[package]").unwrap();
+        fs::write(
+            tmp.join(".readability-ignore"),
+            "\n# comments ignored\nsrc/generated\n*.snap\nsrc/keep.rs\n",
+        )
+        .unwrap();
+        make_rs(&tmp, "src/generated/file.rs", "fn generated() {}");
+        make_rs(&tmp, "src/keep.rs", "fn keep() {}");
+        fs::write(tmp.join("src/output.snap"), "snapshot").unwrap();
+
+        let mut ignore = IgnoreConfig::new(&["custom".to_string()]);
+        ignore.load_ignore_file(&tmp);
+
+        assert!(ignore.exclude_dirs.contains("data"));
+        assert!(ignore.exclude_dirs.contains("custom"));
+        assert!(ignore.exclude_dirs.contains("src/generated"));
+        assert!(ignore.should_skip_file(&tmp, &tmp.join("src/generated/file.rs")));
+        assert!(ignore.should_skip_file(&tmp, &tmp.join("src/output.snap")));
+        assert!(ignore.should_skip_file(&tmp, &tmp.join("src/keep.rs")));
+        assert!(!ignore.should_skip_file(&tmp, &tmp.join("src/main.rs")));
+        assert!(!ignore.should_skip_file(&tmp, &std::env::temp_dir().join("other.rs")));
+    }
+
+    #[test]
+    fn project_root_and_scan_targets_handle_files_dirs_and_missing_paths() {
+        let tmp = make_tmp_dir("targets");
+        fs::write(tmp.join("Cargo.toml"), "[package]").unwrap();
+        make_rs(&tmp, "src/lib.rs", "fn lib() {}");
+        make_rs(&tmp, "src/bin.rs", "fn bin() {}");
+
+        assert_eq!(
+            find_project_root(&tmp.join("src/lib.rs")),
+            Some(tmp.clone())
+        );
+        assert_eq!(find_project_root(&tmp), Some(tmp.clone()));
+
+        let (root, files, _) =
+            resolve_scan_targets(&[tmp.join("src/lib.rs").to_string_lossy().to_string()], &[])
+                .unwrap();
+        assert_eq!(root, tmp);
+        assert_eq!(files.len(), 1);
+        assert!(files[0].ends_with("src/lib.rs"));
+
+        let missing = resolve_scan_targets(
+            &[root.join("src/missing.rs").to_string_lossy().to_string()],
+            &[],
+        );
+        assert!(missing.is_err());
     }
 }

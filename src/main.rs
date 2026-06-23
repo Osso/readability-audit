@@ -5,13 +5,18 @@ mod output;
 mod similarity;
 mod types;
 
-use std::collections::HashMap;
 use clap::Parser;
+#[cfg(not(test))]
+use std::collections::HashMap;
 
+#[cfg(not(test))]
 use crate::types::Issue;
 
 #[derive(Parser)]
-#[command(name = "readability-audit", about = "Readability audit for a Rust repo")]
+#[command(
+    name = "readability-audit",
+    about = "Readability audit for a Rust repo"
+)]
 struct Args {
     /// Paths to scan (file or directory). Defaults to current directory.
     #[arg(value_name = "PATH")]
@@ -34,6 +39,7 @@ struct Args {
     exclude: Option<String>,
 }
 
+#[cfg(not(test))]
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
@@ -46,8 +52,7 @@ fn main() -> anyhow::Result<()> {
         .filter(|s| !s.is_empty())
         .collect();
 
-    let (root, files, mut ignore) =
-        discovery::resolve_scan_targets(&args.paths, &extra_dirs)?;
+    let (root, files, mut ignore) = discovery::resolve_scan_targets(&args.paths, &extra_dirs)?;
 
     if !root.join("Cargo.toml").exists() {
         eprintln!(
@@ -59,7 +64,11 @@ fn main() -> anyhow::Result<()> {
 
     ignore.load_ignore_file(&root);
 
-    eprintln!("Scanning {} Rust files in {}...", files.len(), root.display());
+    eprintln!(
+        "Scanning {} Rust files in {}...",
+        files.len(),
+        root.display()
+    );
 
     let mut all_issues: Vec<Issue> = Vec::new();
 
@@ -110,7 +119,11 @@ fn main() -> anyhow::Result<()> {
 
     if args.write_plan {
         let added = output::append_plan(&root, &all_issues)?;
-        eprintln!("Added {} new items to {}", added, root.join("PLAN.md").display());
+        eprintln!(
+            "Added {} new items to {}",
+            added,
+            root.join("PLAN.md").display()
+        );
     } else if args.json {
         println!("{}", serde_json::to_string_pretty(&all_issues)?);
     } else if args.fix {

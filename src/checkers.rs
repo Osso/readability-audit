@@ -11,9 +11,8 @@ pub const MAX_BODY_LINES_TEST: usize = 200;
 pub const MAX_NESTING: usize = 4;
 pub const MAX_FILE_LINES: usize = 750;
 
-static FN_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^(\s*)(pub(?:\(crate\))?\s+)?(?:async\s+)?fn\s+(\w+)").unwrap()
-});
+static FN_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(\s*)(pub(?:\(crate\))?\s+)?(?:async\s+)?fn\s+(\w+)").unwrap());
 
 static HEX_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"0x[0-9a-fA-F]{3,}").unwrap());
 
@@ -78,7 +77,11 @@ pub fn check_functions(path: &Path, lines: &[&str], root: &Path) -> Vec<Issue> {
 
         let (body_lines, max_depth, close_idx) = scan_fn_body(lines, j);
         let nesting = max_depth.saturating_sub(1); // fn body itself is depth 1
-        let limit = if is_test { MAX_BODY_LINES_TEST } else { MAX_BODY_LINES };
+        let limit = if is_test {
+            MAX_BODY_LINES_TEST
+        } else {
+            MAX_BODY_LINES
+        };
 
         if body_lines > limit {
             issues.push(Issue {
@@ -333,6 +336,14 @@ mod tests {
         let ls = lines(src);
         let issues = check_functions(&fake_path("lib.rs"), &ls, &root());
         assert!(issues.is_empty());
+    }
+
+    #[test]
+    fn test_file_length_flagged() {
+        let lines: Vec<&str> = vec!["x"; MAX_FILE_LINES + 1];
+        let issues = check_file_length(&fake_path("lib.rs"), &lines, &root());
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].category, "LENGTH");
     }
 
     // --- Deep nesting detection ---
